@@ -1,0 +1,68 @@
+###
+NDVI Data from GEE Code
+https://developers.google.com/earth-engine/datasets/catalog/MODIS_061_MOD13A2#bands
+###
+
+// Drawn polygon from the Imports panel
+var studyArea = StudyArea;
+
+// Date range
+var startDate = '2024-01-01';
+var endDate   = '2025-09-30';
+
+// Load MODIS NDVI collection
+var dataset = ee.ImageCollection('MODIS/061/MOD13Q1')
+  .filterDate(startDate, endDate)
+  .filterBounds(studyArea)
+  .select('NDVI');
+
+// Preview one image or a mean composite
+var ndviVis = {
+  min: 0,
+  max: 9000,
+  palette: [
+    'ffffff', 'ce7e45', 'df923d', 'f1b555', 'fcd163',
+    '99b718', '74a901', '66a000', '529400', '3e8601',
+    '207401', '056201', '004c00', '023b01', '012e01',
+    '011d01', '011301'
+  ]
+};
+
+Map.centerObject(studyArea, 9);
+Map.addLayer(studyArea, {color: 'red'}, 'Study Area');
+Map.addLayer(dataset.mean(), ndviVis, 'Mean NDVI');
+
+print(dataset);
+
+var NDVIM = dataset.median();
+print(NDVIM);
+
+Export.image.toDrive({
+  image: NDVIM,
+  description: 'studyareaZambia',
+  folder: 'GEE_exports',
+  region: StudyArea,
+  scale: 1000,
+  maxPixels:1e12
+});   
+
+var ndviTable = dataset.map(function(img) {
+  var stats = img.reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: studyArea,
+    scale: 250,   // important: match resolution
+    maxPixels: 1e13
+  });
+
+  return ee.Feature(null, {
+    date: img.date().format('YYYY-MM-dd'),
+    ndvi_raw: stats.get('NDVI'),
+    ndvi: ee.Number(stats.get('NDVI')).multiply(0.0001)
+  });
+});
+
+Export.table.toDrive({
+  collection: ndviTable,
+  description: 'study_area_MOD13Q1_NDVI_timeseries',
+  fileFormat: 'CSV'
+});
