@@ -1,0 +1,1365 @@
+library(dplyr)
+library(tidyverse)
+library(readxl)
+library(ggplot2)
+library(car) 
+library(lme4)
+library(lmerTest)
+library(GGally)
+library(emmeans)
+library(sjPlot)
+library(readr)  
+library(lubridate)
+library(Hmisc)
+library(tmap)
+library(emojifont)
+library(sf)
+library(readr)
+library(ggspatial)
+library(prettymapr)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(lubridate)
+library(gt)
+library(osmdata)
+library(terra)
+library(data.table)
+library(grid)
+library(png)
+library(amt)
+library(tidyterra)
+library(glmmTMB)
+library("osmextract")
+
+
+
+# Read Demographic Data
+demographic_data = read_csv("Elephant Demographics 2026(ALL).csv")
+
+# Data Cleaning: Demographic ----
+
+#remove columns
+demographic_data = demographic_data %>% 
+  select(-RELATION, -`FORMERLY KNOWN AS`, -`OTHER NOTES`)
+
+#rename columns
+
+names(demographic_data)
+
+demographic_data = demographic_data %>% rename(
+  herd_number = "HERD #  (COLLOQUIAL NAME)",
+  personal_name = "COLLOQUIAL NAME",
+  collared = "COLLARED",
+  age = "AGE",
+  dob = "DOB",
+  age_class = "ELEPHANTS"
+)
+
+# change data type
+demographic_data = demographic_data %>% mutate(
+  across(c(age, dob), as.numeric),
+  across(c(age_class, collared), as.factor),
+  herd_number = as.character(herd_number)
+)
+
+#make a column for gender and mutate so age class is just age class
+demographic_data <- demographic_data %>%
+  mutate(
+    age_class_simple = case_when(
+      str_detect(age_class, "^AF") ~ "A",
+      str_detect(age_class, "^SA") ~ "SA",
+      str_detect(age_class, "^JUV") ~ "JUV",
+      str_detect(age_class, "^INF") ~ "INF",
+      TRUE ~ NA_character_
+    ),
+    
+    sex = case_when(
+      str_detect(age_class, "^AF") ~ "Female",
+      str_detect(age_class, "^SAF") ~ "Female",
+      str_detect(age_class, "^SAM") ~ "Male",
+      str_detect(age_class, "-M-") ~ "Male",
+      str_detect(age_class, "-F-") ~ "Female",
+      TRUE ~ NA_character_
+    )
+  )
+
+demographic_data = demographic_data %>% 
+  slice(1:89) # get rid of all the weird empty rows
+
+demographic_data = demographic_data %>% mutate(
+  sex = as.factor(demographic_data$sex))
+
+demographic_data$age_class_simple = factor(
+  demographic_data$age_class_simple,
+  levels = c("INF", "JUV", "SA", "A")
+)
+
+#remove herds I don't need
+
+demographic_data = demographic_data %>% filter(herd_number %in% c(7369, 6419))
+
+summary(demographic_data)
+  
+# Descriptive Analysis: Herd Structure ----
+
+
+# Number of Male and Female Elephants in Each Age Class
+ggplot(demographic_data, aes(x = age_class_simple, fill = sex)) +
+  geom_bar()
+
+# Number of Elephants in Each Age Class
+
+barplot(table(demographic_data$age_class_simple))
+
+## no juveniles
+
+# Number of Male and Female Elephants in Each Age Class
+
+barplot(table(demographic_data$age_class_simple, demographic_data$sex),
+        beside = T,
+        legend = T)
+
+## males are only in INF or SA category
+## mostly adult females, one SA female
+
+# Number of Male and Female Elephants 
+
+barplot(table(demographic_data$sex))
+
+summary(demographic_data$sex)
+summary(demographic_data$age_class_simple)
+
+table(demographic_data$herd_number, demographic_data$sex)
+
+## all the INFs in 6419 are male
+
+# Mean age of each herd, with n and standard deviation
+
+demographic_data %>% 
+  group_by(herd_number) %>% 
+  summarise(
+    mean_age = mean(age, na.rm = TRUE),
+    n = n(),
+    sd_age = sd(age, na.rm = TRUE)
+  )
+
+# Age Class Break Down by Herd
+
+ggplot(demographic_data, aes(x = age_class_simple, fill = sex)) +
+  geom_bar() +
+  facet_wrap(~herd_number) +
+  labs(x = "Age Class",
+       y = "Number of Elephants",
+       title = "Age Class Distribution by Herd Number")
+
+# Summary of ages by herd in a table
+
+age_summary = demographic_data %>% 
+  group_by(herd_number) %>%  
+  summarise(
+    N = sum(!is.na(age_class_simple)),
+    mean_age = mean(age, na.rm = T),
+    sd_age = sd(age, na.rm = T),
+    min = min(age, na.rm = T),
+    max = max(age, na.rm = T),
+  )
+
+age_class_summary = demographic_data %>%
+  count(herd_number, age_class_simple) %>%
+  pivot_wider(
+    names_from = age_class_simple,
+    values_from = n,
+    values_fill = 0
+  )
+
+final_table = left_join(age_summary, age_class_summary, by = "herd_number")
+
+final_table <- final_table %>%
+  mutate(
+    mean_age = round(mean_age, 1),
+    sd_age = round(sd_age, 1)
+  )
+
+# change order
+final_table <- final_table %>%
+  select(
+    herd_number,
+    N,
+    INF, SA, A,
+    mean_age,
+    sd_age,
+    min,
+    max
+  )
+
+# change column names
+final_table <- final_table %>%
+  rename(
+    Herd = herd_number,
+    `N(total)` = N,
+    `N(INF)` = INF,
+    `N(SA)` = SA,
+    `N(A)` = A,
+    `Mean Age` = mean_age,
+    `SD` = sd_age,
+    `Min Age` = min,
+    `Max Age` = max
+  )
+
+# Make Final Table for Export
+
+final_table %>%
+  gt() %>%
+  tab_header(
+    title = "Age Summary of Elephants by Herd"
+  )
+
+
+## Summary of Infants in Herds in a Table ----
+
+inf_summary <- age_class_summary %>% mutate(
+  percent_inf = INF / (INF + SA + A) * 100
+)
+
+# round
+inf_summary <- inf_summary %>%
+  mutate(
+    percent_inf = round(percent_inf, 1)
+  )
+
+# minus other age classes
+
+inf_summary <- inf_summary %>%
+  select(-SA, -A)
+
+# rename
+
+inf_summary = inf_summary %>% rename(
+  `Herd` = herd_number,
+  `N(INF)` = INF,
+  `% INF` = percent_inf
+)
+
+#table
+inf_summary %>%
+  gt() %>%
+  tab_header(
+    title = "Summary of Infant Distributions of Elephant Herds"
+  )
+
+# Read Collar Data ----
+
+collar_data_6419 = read_csv("/Users/camillemorales/R_Spring_2026/64.csv", show_col_types = FALSE)
+
+collar_data_7369 = read_csv("/Users/camillemorales/R_Spring_2026/H7369.csv", show_col_types = FALSE)
+
+## join
+
+collar_data = bind_rows(collar_data_6419, collar_data_7369)
+
+# Data Cleaning: Collar Data ----
+
+summary(collar_data)
+
+## remove herds I don't need
+
+collar_data = collar_data %>% filter(TagId %in% c(7369, 6419))
+
+## make sure timing is in right format
+
+collar_data <- collar_data %>%
+mutate(
+  Timestamp = ymd_hms(sub(" UTC$", "", Timestamp), tz = "UTC")
+)
+
+str(collar_data$Timestamp)
+
+## Make a new column for year and month
+collar_data <- collar_data %>%
+  mutate(year = year(Timestamp),
+         month = lubridate::month(Timestamp, label = TRUE))
+
+## look at just 2025 data
+collar_data <- collar_data %>%
+  filter(year == "2025" )
+
+## look at just data with 1 hour fixes
+
+collar_data <- collar_data %>%
+  filter(LogInterval == "1_hour" )
+
+## remove zero values, make sure it's specific to Zambia
+
+str(collar_data)
+
+summary(collar_data$latitude)
+summary(collar_data$longitude)
+
+collar_data <- collar_data %>%
+  filter(latitude < -8, latitude > -18) %>%
+  filter(longitude > 20, longitude < 35)
+
+# Descriptive Analysis: Collar Fixes ----
+
+## Count number of fixes per each herd
+
+collar_data %>% 
+  count(TagId)
+
+# 2000 more for 6419
+
+## Fixes per herd graph ----
+
+collar_data %>% 
+  count(TagId) %>%
+  ggplot(aes(x = factor(TagId), y = n)) +
+  geom_col() +
+  theme_minimal() + 
+  labs(title = "Number of Log intervals Per Herd",
+       x = "Herd",
+       y = "Number of Log Intervals")
+
+# Look at number of fixes by month
+
+collar_data %>% 
+  count(month, TagId) %>% 
+  tidyr::pivot_wider(
+    names_from = TagId,
+    values_from = n,
+    values_fill = 0
+  )
+
+## Fixes by month graph ----
+
+collar_data %>% 
+  count(month, TagId) %>% 
+  ggplot(aes(x = month, y = n)) +
+  geom_col() +
+  facet_wrap(~ TagId, scales = "free_y") +
+  theme_minimal() + 
+  labs(title = "Number of Log Intervals per Month",
+       subtitle = "Faceted by Herd",
+       x = "Month",
+       y = "Number of Log Intervals",
+       fill = "Herd")
+
+# select months where there are equal fixes
+collar_data_equal = collar_data %>%
+  filter(month %in% c("Apr","May", "Jun", "Jul", "Aug"))
+
+# replot
+collar_data_equal %>% 
+  count(month, TagId) %>% 
+  ggplot(aes(x = month, y = n)) +
+  geom_col() +
+  facet_wrap(~ TagId, scales = "free_y") +
+  theme_minimal() + 
+  labs(title = "Number of Log Intervals per Month",
+       subtitle = "Faceted by Herd",
+       x = "Month",
+       y = "Number of Log Intervals",
+       fill = "Herd")
+
+# count
+
+collar_data_equal %>% 
+  count(TagId)
+
+## roughly equal now
+
+# only using equal data from here on out, change collar data to equal dataset
+collar_data = collar_data_equal
+  
+
+# MAPS ----
+
+## FIG 1. Zambia, KNP, and lake Iteshi ----
+
+# convert to sf points
+tmap_movement_sf <- st_as_sf(
+  collar_data,
+  coords = c("longitude", "latitude"),
+  crs = 4326
+)
+
+# make a buffered bbox from the same points
+study_bbox <- st_bbox(tmap_movement_sf)
+study_bbox["xmin"] <- study_bbox["xmin"] - 0.05
+study_bbox["xmax"] <- study_bbox["xmax"] + 0.05
+study_bbox["ymin"] <- study_bbox["ymin"] - 0.05
+study_bbox["ymax"] <- study_bbox["ymax"] + 0.05
+
+study_area <- st_as_sfc(study_bbox)
+
+# plot study area with protected area shapefile
+
+protected_area <- st_read("/Users/camillemorales/R_Spring_2026/Kafue_National.shx")
+zambia_boundary <- st_read("Zambia_border.shp")
+
+st_crs(protected_area) <- 32735
+st_crs(zambia_boundary) <- 32735
+
+protected_area <- st_transform(protected_area, 4326)
+zambia_boundary <- st_transform(zambia_boundary, 4326)
+
+st_bbox(protected_area)
+st_bbox(zambia_boundary)
+
+zambia_label <- st_point_on_surface(zambia_boundary)
+zambia_label$label <- "Zambia"
+
+kafue_label <- st_point_on_surface(protected_area)
+kafue_label$label <- "Kafue National Park"
+
+tmap_mode("plot")
+
+tm_shape(zambia_boundary) +
+  tm_basemap("Esri.NatGeoWorldMap") +
+  tm_shape(protected_area) +
+  tm_polygons(fill = "red", fill_alpha = 0.3, border.col = "red", lwd = 2) +
+  tm_compass(position = c("right", "top"), size = 3) +
+  tm_shape(kafue_label) +
+  tm_text("label", size = 0.9, fontface = "bold", xmod = 6.5, ymod = 1.5) +
+  tm_shape(zambia_label) +
+  tm_scalebar(position = c("right", "bottom"), width = 30) 
+
+inset_img <- readPNG("Africa_Inset_Image_1.png")
+
+grid.raster(
+  inset_img,
+  x = 0.11,
+  y = 0.98,
+  width = 0.25,
+  height = 0.3,
+  just = c("left", "top")
+)
+
+# set a window for tmap
+# put white letters behind 
+# try other map tiles to see if they look better
+# OSM would be better for higher resolution 
+
+## Movement Tracks and Roads ----
+
+# convert to sf object
+
+movement_sf <- st_as_sf(
+  collar_data,
+  coords = c("longitude", "latitude"),
+  crs = 4326
+)
+
+bbox <- st_bbox(movement_sf)
+
+### Define Study Area ----
+### osm needs a numeric object, not an sf bbox
+
+bbox_vec = c(
+  xmin = bbox["xmin"] - 0.01, #adding buffer
+  ymin = bbox["ymin"] - 0.01,
+  xmax = bbox["xmax"] + 0.01,
+  ymax = bbox["ymax"] + 0.01
+)
+
+### Basic Map of Where collar locations are ----
+
+ggplot() +
+  annotation_map_tile(type = "osm", zoom = 10) +
+  geom_sf(data = movement_sf, size = 0.5, alpha = 0.6) +
+  theme_minimal() +
+  labs(title = "Elephant Collar Locations")
+
+### originally looked like there's an outlier needs to be removed 
+### went back above and added filtering step to correct for that
+
+#### distinguish herd by color
+ggplot() +
+  annotation_map_tile(type = "osm", zoom = 10) +
+  geom_sf(data = movement_sf, aes(color = as.factor(TagId)), size = 0.5, alpha = 0.6) +
+  theme_minimal() +
+  labs(title = "Elephant Collar Locations, Faceted by Herd")
+
+#### create lines
+
+movement_lines <- collar_data %>%
+  arrange(TagId, Timestamp) %>%
+  group_by(TagId) %>%
+  summarise(
+    geometry = st_cast(st_combine(st_as_sf(cur_data(),
+                                           coords = c("longitude", "latitude"),
+                                           crs = 4326)), "LINESTRING"),
+                                            .groups = "drop"
+                                            ) %>%
+                                              st_as_sf()
+
+class(movement_lines)
+st_geometry_type(movement_lines)
+
+#### PLOT LINES ----
+
+ggplot() +
+  annotation_map_tile(type = "osm", zoom = 10) +
+  geom_sf(data = movement_lines,
+          aes(color = as.factor(TagId)),
+          linewidth = 0.8) +
+  theme_minimal()
+
+### Get roads from OSM ----
+
+# osm_roads <- opq(bbox = bbox_vec) %>%
+#   add_osm_feature(key = "highway",
+#                   value = c("tertiary", "unclassified")
+#                   ) %>%
+#   osmdata_sf()
+# 
+# roads <- opq(bbox = bbox_vec) %>%
+#   add_osm_feature(
+#     key = "highway",
+#     value = c("primary", "secondary", "tertiary", "unclassified")
+#   ) %>%
+#   osmdata_sf()
+# 
+# roads_sf <- roads$osm_lines
+
+# save it so don't have to query OSM in future
+#saveRDS(roads, "roads.rds")
+#roads <- readRDS("roads.rds")
+
+# # select sf object
+# roads_sf <- roads$osm_lines
+# 
+# table(roads_sf$highway)
+# unique(roads_sf$name) # gets names of actual roads within
+
+# using osm extract
+# 
+# roads_sf <- oe_get(
+#   "Zambia",
+#   layer = "lines",
+#   query = "SELECT * FROM lines WHERE highway IN ('primary', 'secondary', 'tertiary', 'unclassified')"
+# )
+# 
+# # use my own api key for qgis, arcgis
+# 
+# roads_sf <- st_as_sf(roads_sf) %>%
+#   st_intersection(st_as_sfc(st_bbox(movement_sf)))
+# 
+# study_area <- st_as_sfc(st_bbox(movement_sf)) %>%
+#   st_buffer(0.01)
+# 
+# roads_sf <- st_intersection(roads_sf, study_area)
+
+## make sure crs matches for both
+#st_crs(roads)
+
+## add label for Cordon Road for map
+
+# cordon_road <- roads_sf %>% 
+#   filter(name == "Cordon Road")
+
+# got an error in first attempt at adding label because
+# there were multiple segments for cordon road
+# nrow(cordon_road)
+# 
+# single_cordon_road <- cordon_road[1,]
+# 
+# # project into UTM to calculate point on road to put label
+# 
+# cordon_road_projected <- st_transform(single_cordon_road, 32735)
+# 
+# # create a point along the road for the label to go
+# 
+# cordon_label_point <- st_line_sample(cordon_road_projected, sample = 0.5) %>%
+#   st_cast("POINT") %>%
+#   st_transform(4326) # transform back after getting point
+
+### Use Roads from Shapefile ----
+
+roads_shp <- st_read("Roads.shp")
+
+# change to right coordinate system
+st_crs(roads_shp) <- 4326
+
+# Roads not labled in this shapefile...
+# add IDs to each segment of road to figure out
+# which corresponds to Cordon Road
+
+roads_shp$road_id <- 1:nrow(roads_shp)
+
+# map with segements labeled
+ggplot() +
+  annotation_map_tile(type = "osm", zoom = 10) +
+  geom_sf(data = roads_shp, color = "red", linewidth = 0.8) +
+  geom_sf_text(data = st_centroid(roads_shp), aes(label = road_id), size = 3) +
+  theme_minimal()
+
+#create a box to zoom in on cordon to make labels more clear
+cordon_bbox <- st_as_sfc(st_bbox(c(
+  xmin = 25.9,
+  xmax = 26.05,
+  ymin = -15.95,
+  ymax = -15.7
+), crs = 4326))
+
+roads_zoom <- st_intersection(roads_shp, cordon_bbox)
+
+# change name of roads_shp for mapping later on
+roads_sf <- roads_shp
+
+# map just the zoomed in area
+
+ggplot() +
+  annotation_map_tile(type = "osm", zoom = 12) +
+  geom_sf(data = roads_zoom, color = "red", linewidth = 1) +
+  geom_sf_text(
+    data = st_centroid(roads_zoom),
+    aes(label = road_id),
+    size = 4
+  ) +
+  theme_minimal()
+
+# add 49 to 8 to getCordon road segment to extend high enough
+cordon_road <- roads_shp %>%
+  filter(road_id %in% c(8, 49)) %>%
+  summarise()
+
+# map to check that 8 and 49 together go high enough
+
+ggplot() +
+  annotation_map_tile(type = "osm", zoom = 10) +
+  geom_sf(data = movement_lines,
+          aes(color = as.factor(TagId)),
+          linewidth = 0.8) +
+  geom_sf(data = cordon_road, color = "red", linewidth = 1.2) +
+  theme_minimal() +
+  labs(title = "Elephant Paths and Cordon Road Segment",
+       color = "Herd")
+
+### Recreate Cordon Road label ----
+
+cordon_road_projected <- st_transform(cordon_road, 32735)
+
+cordon_label_point <- cordon_road_projected %>%
+  st_cast("LINESTRING") %>%
+  slice(1) %>% #road originally had 2 segments, slicing just one of them
+  st_line_sample(sample = 0.5) %>%
+  st_cast("POINT") %>%
+  st_transform(4326)
+
+#### PLOT ROADS ----
+
+ggplot() +
+  annotation_map_tile(type = "osm", zoom = 10) +
+  geom_sf(data = roads_sf, color = "red", linewidth = 0.8) +
+  theme_minimal() +
+  labs(title = "Elephant Paths and Major Roads")
+
+#### PLOT LINES AND ROADS ----
+
+ggplot() +
+  annotation_map_tile(type = "osm", zoom = 10) +
+  geom_sf(data = roads_sf, color = "grey", linewidth = 0.8) +
+  geom_sf(data = cordon_road, color = "red", linewidth = 1.2) +
+  geom_sf(data = movement_lines,
+          aes(color = as.factor(TagId)),
+          linewidth = 0.8) +
+  geom_sf_text(
+    data = cordon_label_point,
+    aes(label = "Cordon Road"),
+    angle = 70,
+    color = "white",
+    size = 4.1) +
+  geom_sf_text(
+    data = cordon_label_point,
+    aes(label = "Cordon Road"),
+    angle = 70,
+    color = "black",
+    size = 4) +
+  labs(title = "Elephant Paths and Major Roads",
+       color = "Herd") +
+  theme_minimal() +
+  theme(
+    axis.title = element_blank(),
+    axis.text = element_blank(),
+    axis.ticks = element_blank()
+  ) 
+
+## Kernel Density Estimates ----
+
+# project sf into a metric CRS
+
+collar_sf <- st_as_sf(
+  collar_data, 
+  coords = c("longitude", "latitude"),
+  crs = 4326
+)
+
+collar_sf_utm <- st_transform(collar_sf, 32735)
+
+# amt package needs x/y coordinates 
+
+coords <- st_coordinates(collar_sf_utm)
+
+collar_equal_proj <- collar_sf_utm %>%
+  st_drop_geometry() %>%
+  mutate(
+    x_ = coords[,1],
+    y_ = coords[,2]
+  )
+
+# make amt tracks
+
+amt_tracks <- make_track(
+  collar_equal_proj,
+  .x = x_,
+  .y = y_,
+  .t = Timestamp,
+  id = TagId,
+  crs = st_crs(collar_sf_utm)$wkt
+)
+
+## In my first attempt, amt didn't recognize ID column in KDE calculations
+## so build herd separately
+
+amt_tracks_by_herd <- collar_equal_proj %>%
+  group_by(TagId) %>%
+  group_split()
+
+# build KDEs separately
+
+kde_list <- lapply(amt_tracks_by_herd, function(df){
+  herd_id <- unique(df$TagId)
+  
+  trk <- make_track(
+    df,
+    .x = x_,
+    .y = y_,
+    .t = Timestamp,
+    id = TagId,
+    crs = st_crs(collar_sf_utm)$wkt
+  )
+  
+  kde <- hr_kde(trk)
+  
+  kde_50 <- hr_isopleths(kde, levels = 0.50) %>%
+    mutate(TagId = herd_id)
+  
+  kde_95 <- hr_isopleths(kde, levels = 0.95) %>%
+    mutate(TagId = herd_id)
+  
+  list(kde_50 = kde_50, kde_95 = kde_95)
+})
+
+# combine all together
+kde_50 <- do.call(rbind, lapply(kde_list, `[[`, "kde_50"))
+kde_95 <- do.call(rbind, lapply(kde_list, `[[`, "kde_95"))
+
+#check names
+names(kde_50)
+names(kde_95)
+
+##### Plot the KDEs ----
+
+ggplot() +
+  annotation_map_tile(type = "osm", zoom = 10) +
+  geom_sf(data = kde_95, aes(fill = factor(TagId)), alpha = 0.6, color = "black") +
+  geom_sf(data = kde_50, aes(fill = factor(TagId)), alpha = 0.5, color = NA) +
+  theme_minimal() +
+  labs(fill = "Herd")
+
+### need to get it so it doesn't look like they're in the water
+
+
+#####Calculate areas ----
+
+## 95% isopopleth
+kde_95 %>% mutate(area_m2 = st_area(geometry),
+                  area_km2 = as.numeric(area_m2)/1e6) %>%
+st_drop_geometry() %>%
+select(TagId, level, area_km2)
+
+## 50% isopleth
+
+kde_50 %>% mutate(area_m2 = st_area(geometry),
+                  area_km2 = as.numeric(area_m2)/1e6) %>%
+  st_drop_geometry() %>%
+  select(TagId, level, area_km2)
+
+# FIG 3. CROSSINGS PER DAY ----
+## Calculate Crossings ----
+crossings <- st_intersection(movement_lines, roads_sf)
+
+crossings %>%
+  st_drop_geometry() %>% #have to drop geometry before counting
+  count(TagId)
+
+### but this is showing for the whole linestring
+### need to build step segments
+
+# movement_steps <- collar_data %>%
+#   arrange(TagId, Timestamp) %>%
+#   group_by(TagId) %>%
+#   mutate(
+#     xend = lead(longitude), #lead() gives the next row's value
+#     yend = lead (latitude)) %>%
+#   filter(!is.na(xend)) %>% #filter out last rows
+#   rowwise() %>% # tells it for each row, build a line from it's coordinates (treat each row independently)
+#   mutate(
+#     geometry = st_sfc(       #st_sfc turns into a geometry object with CRS 4326
+# st_linestring(matrix(       #create coordinate vector matrix, and linestring connects two points within
+#   c(longitude, latitude, xend, yend),
+#   ncol = 2,
+#   byrow = TRUE
+#   )),
+#   crs = 4326)) %>%
+#   st_as_sf() %>%
+#   ungroup()
+
+movement_steps <- collar_data %>%
+  arrange(TagId, Timestamp) %>%
+  group_by(TagId) %>%
+  mutate(
+    xend = lead(longitude),
+    yend = lead(latitude)
+  ) %>%
+  filter(!is.na(xend)) %>%
+  rowwise() %>%
+  mutate(
+    geometry = st_sfc(
+      st_linestring(
+        matrix(
+          c(longitude, latitude, xend, yend),
+          ncol = 2,
+          byrow = TRUE
+        )
+      ),
+      crs = 4326
+    )
+  ) %>%
+  st_as_sf() %>%
+  ungroup()
+
+# THIS WAS FOR CALCULATING INTERSECTIONS WITH OSM DATA
+# calculate intersections of steps with roads
+# 
+# step_crossings <- st_intersection(movement_steps, roads_sf)
+# 
+# step_crossings %>%
+#   st_drop_geometry() %>%
+#   select(TagId, highway, name) %>%
+#   count(TagId)
+# 
+# # count types of roads
+# step_crossings %>%
+#   st_drop_geometry() %>%
+#   select(TagId, highway, name) %>%
+#   count(TagId, highway)
+# 
+# # count specific roads
+# step_crossings %>%
+#   st_drop_geometry() %>%
+#   count(TagId, name, sort = TRUE)
+
+#### All Roads ----
+step_crossings <- st_intersection(movement_steps, roads_sf)
+
+step_crossings %>%
+  st_drop_geometry() %>%
+  count(TagId)
+
+##### Cross Points ----
+# extract points within linestring that represent exact crossings
+
+cross_points <- st_collection_extract(step_crossings, "POINT")
+
+# count cross points
+
+cross_points %>%
+  st_drop_geometry() %>%
+  count(TagId)
+
+# convert to points
+
+cross_points <- st_collection_extract(step_crossings, "POINT")
+
+##### Map where Cross Points are ----
+
+ggplot() +
+  annotation_map_tile(type = "osm", zoom =10) +
+  geom_sf(data = roads_sf, color = "grey", linewidth = 0.8) +
+  geom_sf(data = cordon_road, color = "red", linewidth = 1.2) +
+  geom_sf(data = movement_lines, aes(color = as.factor(TagId)), linewidth = 0.8) +
+  geom_sf(data = cross_points, color = "yellow", size = 1) + 
+  labs(title = "Elephant Paths, Major Roads and Crossing Points",
+       color = "Herd") +
+  theme_minimal() +
+  theme(
+    axis.title = element_blank(),
+    axis.text = element_blank(),
+    axis.ticks = element_blank()
+  ) 
+
+#### Cordon Road ----
+cordon_step_crossings <- st_intersection(movement_steps, cordon_road)
+
+cordon_step_crossings %>%
+  st_drop_geometry() %>%
+  count(TagId)
+
+##### Cross Points ----
+# extract points within linestring that represent exact crossings
+
+cordon_cross_points <- st_collection_extract(cordon_step_crossings, "POINT")
+
+# count cross points
+
+cordon_cross_points %>%
+  st_drop_geometry() %>%
+  count(TagId)
+
+##### Map where Cross Points are ----
+
+ggplot() +
+  annotation_map_tile(type = "osm", zoom =10) +
+  geom_sf(data = roads_sf, color = "grey", linewidth = 0.8) +
+  geom_sf(data = cordon_road, color = "red", linewidth = 1.2) +
+  geom_sf(data = movement_lines, aes(color = as.factor(TagId)), linewidth = 0.8) +
+  geom_sf(data = cordon_cross_points, color = "yellow", size = 1) + 
+  labs(title = "Elephant Paths, Major Roads and Crossing Points",
+       color = "Herd") +
+  theme_minimal() +
+  theme(
+    axis.title = element_blank(),
+    axis.text = element_blank(),
+    axis.ticks = element_blank()
+  ) 
+
+
+### Buffered -----
+
+# calculate what the buffer amount should be
+# see what average movement is per hour
+# or use error of collar 
+
+# could try a different buffer for each cluster
+# look at distributions of gordon road
+
+## project into UTM for calculations
+
+movement_steps_proj <- st_transform(movement_steps, 32735)
+
+## calculate line lengths
+
+movement_steps_dist <- movement_steps_proj %>%
+  mutate(step_length_m = st_length(.))
+
+## calculate median (robust to outliers)
+
+median_step <- median(movement_steps_dist$step_length_m, na.rm = TRUE)
+median_step <- as.numeric(median_step)
+median_step
+
+# look at distribution of step lengths to make sure this seems right
+### SF.X Distribution of Step Lengths ----
+hist(
+  as.numeric(movement_steps_dist$step_length_m),
+  breaks = 50,
+  main = "Distribution of Elephant Step Lengths",
+  xlab = "Step Length (m)",
+  ylab = "Frequency")
+
+# NO LONGER USING BUFFER IN CALCULATIONS SO COMMENTED OUT
+# # buffer roads
+# 
+# roads_buffer <- st_buffer(roads_sf, dist = 10)
+# 
+# ## intersect with buffered roads
+# 
+# step_crossings_buffer <- st_intersection(movement_steps, roads_buffer)
+# 
+# ## crossings with roads buffered
+# step_crossings_buffer %>%
+#   st_drop_geometry() %>%
+#   count(TagId)
+# 
+# ## crossings with roads buffered, specific roads
+# 
+# step_crossings_buffer %>%
+#   st_drop_geometry() %>%
+#   count(TagId, name, sort = TRUE)
+# 
+# # convert to points with roads buffered
+# 
+# cross_points_buffer <- st_collection_extract(step_crossings_buffer, "POINT")
+#   
+
+## Calculate Rates per day ----
+
+### All Roads ----
+# add date column to cross_points object
+cross_points <- cross_points %>%
+  mutate(date = as.Date(Timestamp))
+
+#count crossings per day per herd
+crossings_daily <- cross_points %>% 
+  st_drop_geometry() %>% 
+  count(TagId, date, name = "n_crossings")
+
+# need full date sequence
+
+all_days <- collar_data %>% 
+  mutate(date = as.Date(Timestamp)) %>% 
+  distinct(TagId, date)
+
+# join and fill zeros
+
+crossings_daily <- all_days %>% 
+  left_join(crossings_daily, by = c("TagId", "date")) %>% 
+  mutate(n_crossings = ifelse(is.na(n_crossings), 0, n_crossings))
+
+#### Daily Rate ----
+
+crossings_daily %>% 
+  group_by(TagId) %>% 
+  summarise(
+    mean_crossings = mean(n_crossings),
+    sd_crossings = sd(n_crossings),
+    n_days = n()
+  )
+
+##### Plot Daily Crossing Rates ----
+
+ggplot(crossings_daily, aes(x = as.factor(TagId), y = n_crossings)) +
+  geom_boxplot() +
+  #geom_jitter(width = 0.2, alpha = 0.5) +
+  theme_minimal() + 
+  labs(
+    x = "Herd",
+    y = "Crossings per Day",
+    title = "Daily Road Crossing Rates by Herd"
+  )
+
+#### Monthly Rate ----
+
+#count crossings per month per herd
+
+crossings_monthly <- cross_points %>%
+  st_drop_geometry() %>%
+  count(TagId, month,name = "n_crossings")
+
+crossings_monthly %>%
+  group_by(TagId) %>%
+  summarise(
+    mean_crossings = mean(n_crossings),
+    sd_crossings = sd(n_crossings),
+    n_months = n()
+  )
+
+##### Plot Monthly Crossing Rates ----
+
+ggplot(crossings_monthly, aes(x = as.factor(TagId), y = n_crossings)) +
+  geom_boxplot() +
+  #geom_jitter(width = 0.2, alpha = 0.5) +
+  theme_minimal() + 
+  labs(
+    x = "Herd",
+    y = "Crossings per Day",
+    title = "Monthly Road Crossing Rates by Herd"
+  )
+
+### Cordon Road ----
+# add date column to cross_points object
+cordon_cross_points <- cordon_cross_points %>%
+  mutate(date = as.Date(Timestamp))
+
+cordon_daily = cordon_cross_points %>%
+  st_drop_geometry() %>%
+  count(TagId, date, name = "n_crossings")
+
+all_days <- collar_data %>% 
+  mutate(date = as.Date(Timestamp)) %>% 
+  distinct(TagId, date)
+
+# join and fill zeros
+
+cordon_daily <- all_days %>% 
+  left_join(cordon_daily, by = c("TagId", "date")) %>% 
+  mutate(n_crossings = ifelse(is.na(n_crossings), 0, n_crossings))
+
+#### Daily Rate ----
+
+cordon_daily %>% 
+  group_by(TagId) %>% 
+  summarise(
+    mean_crossings = mean(n_crossings),
+    sd_crossings = sd(n_crossings),
+    n_days = n()
+  )
+
+##### Plot Daily Rates Cordon Road Crossings ----
+
+ggplot(cordon_daily, aes(x = as.factor(TagId), y = n_crossings)) +
+  geom_boxplot() +
+  #geom_jitter(width = 0.2, alpha = 0.5) +
+  theme_minimal() + 
+  labs(
+    x = "Herd",
+    y = "Crossings per Day",
+    title = "Daily Road Crossing Rates of Cordon Road by Herd"
+  )
+
+#### Monthly Rate ----
+
+cordon_monthly = cordon_cross_points %>%
+  st_drop_geometry() %>%
+  count(TagId, month, name = "n_crossings")
+
+cordon_monthly %>%
+  group_by(TagId) %>%
+  summarise(
+    mean_crossings = mean(n_crossings),
+    sd_crossings = sd(n_crossings),
+    n_months = n()
+  )
+
+##### Plot Monthly Rates Cordon Road Crossing ----
+
+ggplot(cordon_monthly, aes(x = as.factor(TagId), y = n_crossings)) +
+  geom_boxplot() +
+  #geom_jitter(width = 0.2, alpha = 0.5) +
+  theme_minimal() + 
+  labs(
+    x = "Herd",
+    y = "Crossings per Month",
+    title = "Monthly Road Crossing Rates of Cordon Road by Herd"
+  )
+
+## but is this potentially biased because this herd just doesn't go over there?
+
+
+## maybe go back and make buffered numbers in these plots 
+
+# Loading GEE data ----
+
+## NDVI ----
+
+ndvi_raster <- rast("studyareaZambia.tif")/10000
+plot(ndvi_raster)
+
+ndvi_df <- read_csv("study_area_MOD13Q1_NDVI_timeseries.csv")
+head(ndvi_df)
+glimpse(ndvi_df)
+summary(ndvi_df)
+
+# classify date as a date
+ndvi_df <- ndvi_df %>%
+  mutate(date = as.Date(date))
+
+# arrange both by date
+cordon_daily <- cordon_daily %>%
+  arrange(date)
+
+ndvi_df <- ndvi_df %>%
+  arrange(date)
+
+### Assign NDVI to each point based on 16 day window ----
+
+cordon_cross_dt <- as.data.table(cordon_daily)
+ndvi_dt <- as.data.table(ndvi_df)
+
+setorder(cordon_cross_dt, date)
+setorder(ndvi_dt, date)
+
+cordon_cross_ndvi <- ndvi_dt[cordon_cross_dt, on = .(date), roll = TRUE]
+
+cordon_cross_ndvi <- as.data.frame(cordon_cross_ndvi)
+
+cordon_cross_ndvi <- cordon_cross_ndvi %>% mutate(
+  TagId = as.factor(TagId),
+  ndvi = as.numeric(ndvi)
+)
+
+### Plot NDVI and KDE ----
+crs(ndvi_raster)
+st_crs(kde_95)
+
+# reproject raster
+ndvi_raster_reprojected <- project(ndvi_raster, st_crs(kde_95)$wkt)
+
+# convert to data frame so ggplot can work with it
+ndvi_new_df <- as.data.frame(ndvi_raster_reprojected, xy = TRUE, na.rm = TRUE)
+
+# check column names
+names(ndvi_new_df)
+
+# plot
+
+ggplot() +
+  geom_raster(data = ndvi_new_df, aes(x = x, y = y, fill = NDVI)) +
+  scale_fill_viridis_c(name = "NDVI") +
+  geom_sf(data = kde_95, fill = NA, color = "black", linewidth = 1) +
+  geom_sf(data = kde_50, fill = NA, color = "red", linewidth = 1) +
+  facet_wrap(~ TagId) +
+  theme_minimal() + 
+  theme(
+    axis.title = element_blank(),
+    axis.text = element_blank(),
+    axis.ticks = element_blank()
+  ) 
+
+### Calculate mean ndvi within each herd's core area ----
+
+crs(ndvi_raster)
+st_crs(kde_50)
+
+kde_50_calc <- st_transform(kde_50, crs(ndvi_raster))
+
+# convert KDE to spatial vector
+
+kde_50_vect <- vect(kde_50_calc)
+
+# extract mean NDVI
+
+ndvi_core <- extract(
+  ndvi_raster,
+  kde_50_vect,
+  fun = mean, 
+  na.rm = TRUE
+)
+
+# attach herd IDs
+
+ndvi_core$TagId <- kde_50$TagId
+
+ndvi_core
+
+# mean ndvi is higher in 7369's core area
+
+### Is mean ndvi for core area statsitically different? ----
+
+# extract all ndvi values
+
+ndvi_vals <- extract(
+  ndvi_raster,
+  kde_50_vect
+)
+
+# add herd ID
+
+ndvi_vals$TagId <- kde_50$TagId[ndvi_vals$ID]
+
+# remove NAs
+
+ndvi_vals <- ndvi_vals %>% 
+  filter(!is.na(NDVI)
+)
+
+# take a random sample
+
+set.seed(123)
+
+ndvi_sample <- ndvi_vals %>%
+  group_by(TagId)  %>%
+  slice_sample(n = 500)
+
+#### wilcox test ----
+
+wilcox.test(NDVI ~ TagId, data = ndvi_sample)
+
+# r has baked in ttest, goes over homogeneity of variance
+# Welch means its corrected
+t.test(NDVI ~ TagId, data = ndvi_sample)
+
+#### plot ndvi core area difference ----
+
+ggplot(ndvi_sample, aes(x = factor(TagId), y = NDVI)) +
+         geom_boxplot() +
+         theme_minimal() +
+         labs(
+           x = "Herd",
+           y = "NDVI Core Area"
+         )
+
+## Model ----
+
+# create time grouping variable
+
+cordon_cross_ndvi_w_periods <- cordon_cross_ndvi %>%
+  mutate(period = floor_date(date, unit = "16 days"))
+
+### Poisson ----
+model_poisson <- glmmTMB(
+  n_crossings ~ TagId + ndvi + (1 | period),
+  data = cordon_cross_ndvi_w_periods,
+  family = poisson
+)
+
+summary(model_poisson)
+
+## check overdispersion
+
+overdispersion <- sum(residuals(model_poisson, type = "pearson")^2) / df.residual(model_poisson)
+overdispersion
+
+## do herds respond differently to ndvi? 
+
+##### Visualize ----
+
+ggplot(cordon_cross_ndvi_w_periods, aes(x = ndvi, y = n_crossings, color = TagId)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "glm", method.args = list(family = "poisson")) +
+  theme_minimal()
+
+
+### Negative Bionmial ----
+
+model_neg_binomial <- glmmTMB(
+  n_crossings ~ TagId + ndvi + (1 | period),
+  data = cordon_cross_ndvi_w_periods,
+  family = nbinom2
+)
+
+summary(model_neg_binomial)
+
+# export table in a file
+tab_model(
+  model_neg_binomial,
+  show.re.var = TRUE,
+  show.icc = FALSE,
+  show.ci = FALSE,
+  show.se = TRUE,
+  p.style = "scientific",
+  pred.labels = c(
+    "(Intercept)",
+    "Herd 7369",
+    "NDVI"
+  ),
+  file = "SE_neg_binomial_infant_crossing_model_results.doc"
+)
+
+### Binary ---- 
+
+## make binary data within crossed column ( 1= true, 0 = false)
+# cordon_cross_ndvi_w_periods <- cordon_cross_ndvi_w_periods %>%
+#   mutate(crossed = if_else(n_crossings > 0, 1, 0))
+# 
+# model_binary <- glmmTMB(
+#   crossed ~ TagId + ndvi + (1 | period),
+#   data = cordon_cross_ndvi_w_periods,
+#   family = binomial
+# )
+
+# Visualize Variance across time periods detected in
+# Negative Binomial Model
+
+crossings_per_period <- cordon_cross_ndvi_w_periods %>%
+  group_by(period, TagId) %>%
+  summarise(total_crossings = sum(n_crossings, na.rm = TRUE))
+
+ggplot(crossings_per_period, aes(x = period, y = total_crossings, color = TagId)) +
+  geom_line() +
+  geom_point() +
+  theme_minimal() +
+  labs(title = "Number of Cordon Road Crossings by Period",
+       x = "Time (16 Day Periods)",
+       y = "Number of Cordon Road Crossings")
