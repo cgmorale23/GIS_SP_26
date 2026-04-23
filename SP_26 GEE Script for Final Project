@@ -1,6 +1,6 @@
 ###
-NDVI Data from GEE Code
-https://developers.google.com/earth-engine/datasets/catalog/MODIS_061_MOD13A2#bands
+#NDVI Data from GEE Code
+#https://developers.google.com/earth-engine/datasets/catalog/MODIS_061_MOD13A2#bands
 ###
 
 // Drawn polygon from the Imports panel
