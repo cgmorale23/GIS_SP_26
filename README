@@ -1,7 +1,7 @@
 These scripts are what was used for the SP_26 GIS Final Project "Did the Infant Elephant Cross the Road? Differences in Movement Patterns and Home Range Estimates in African Savanna Elephants with Varying Proportions of Infants" 
 
 There are two scripts here, one for R and one for Google Earth Engine that was used to obtain NDVI data.
-The GEE script should be used on this website:
+The GEE script should be used on this website: https://developers.google.com/earth-engine/datasets/catalog/MODIS_061_MOD13A2#bands
 
 The files with accompanying data and shapefiles have been sent in an email to Dr. Chaves, and should be 
 deleted after analysis due to sensitivity around the collared elephant tracking data.
