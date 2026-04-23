@@ -577,6 +577,8 @@ ggplot() +
 #   st_cast("POINT") %>%
 #   st_transform(4326) # transform back after getting point
 
+## ended up not using this label as I just put the description in the figure legend 
+## and thought it looked cleaner without it.
 ### Use Roads from Shapefile ----
 
 roads_shp <- st_read("Roads.shp")
