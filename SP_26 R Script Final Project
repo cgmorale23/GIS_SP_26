@@ -6,7 +6,6 @@ library(car)
 library(lme4)
 library(lmerTest)
 library(GGally)
-library(emmeans)
 library(sjPlot)
 library(readr)  
 library(lubridate)
@@ -29,11 +28,11 @@ library(png)
 library(amt)
 library(tidyterra)
 library(glmmTMB)
-library("osmextract")
+library(osmextract)
 
 
 
-# Read Demographic Data
+# Demographic Data ----
 demographic_data = read_csv("Elephant Demographics 2026(ALL).csv")
 
 # Data Cleaning: Demographic ----
@@ -113,7 +112,7 @@ barplot(table(demographic_data$age_class_simple))
 
 ## no juveniles
 
-# Number of Male and Female Elephants in Each Age Class
+## Number of Male and Female Elephants in Each Age Class
 
 barplot(table(demographic_data$age_class_simple, demographic_data$sex),
         beside = T,
@@ -122,7 +121,7 @@ barplot(table(demographic_data$age_class_simple, demographic_data$sex),
 ## males are only in INF or SA category
 ## mostly adult females, one SA female
 
-# Number of Male and Female Elephants 
+## Male vs Female Elephants
 
 barplot(table(demographic_data$sex))
 
@@ -143,11 +142,13 @@ demographic_data %>%
     sd_age = sd(age, na.rm = TRUE)
   )
 
-# Age Class Break Down by Herd
+### SF 1: Age Class Break Down by Herd ----
+
 
 ggplot(demographic_data, aes(x = age_class_simple, fill = sex)) +
   geom_bar() +
   facet_wrap(~herd_number) +
+  scale_fill_manual(values = c("pink", "blue")) +
   labs(x = "Age Class",
        y = "Number of Elephants",
        title = "Age Class Distribution by Herd Number")
@@ -215,7 +216,7 @@ final_table %>%
   )
 
 
-## Summary of Infants in Herds in a Table ----
+### ST 1: Infant Proportions in Herds in a Table ----
 
 inf_summary <- age_class_summary %>% mutate(
   percent_inf = INF / (INF + SA + A) * 100
@@ -247,7 +248,7 @@ inf_summary %>%
     title = "Summary of Infant Distributions of Elephant Herds"
   )
 
-# Read Collar Data ----
+# Collar Data ----
 
 collar_data_6419 = read_csv("/Users/camillemorales/R_Spring_2026/64.csv", show_col_types = FALSE)
 
@@ -315,7 +316,7 @@ collar_data %>%
   ggplot(aes(x = factor(TagId), y = n)) +
   geom_col() +
   theme_minimal() + 
-  labs(title = "Number of Log intervals Per Herd",
+  labs(title = "Number of GPS Fixes Per Herd",
        x = "Herd",
        y = "Number of Log Intervals")
 
@@ -333,32 +334,35 @@ collar_data %>%
 
 collar_data %>% 
   count(month, TagId) %>% 
-  ggplot(aes(x = month, y = n)) +
+  ggplot(aes(x = month, y = n, fill = as.factor(TagId))) +
   geom_col() +
   facet_wrap(~ TagId, scales = "free_y") +
+  scale_fill_manual(values = c("#F8766D", "#00BFC4")) +
   theme_minimal() + 
-  labs(title = "Number of Log Intervals per Month",
+  labs(title = "Number of GPS Fixes per Month",
        subtitle = "Faceted by Herd",
        x = "Month",
-       y = "Number of Log Intervals",
-       fill = "Herd")
+       y = "Number of Log Intervals") +
+  theme(legend.position = "none")
 
 # select months where there are equal fixes
 collar_data_equal = collar_data %>%
   filter(month %in% c("Apr","May", "Jun", "Jul", "Aug"))
 
 # replot
+### SF 2: Fixes per month ----
 collar_data_equal %>% 
   count(month, TagId) %>% 
-  ggplot(aes(x = month, y = n)) +
+  ggplot(aes(x = month, y = n, fill = as.factor(TagId))) +
   geom_col() +
   facet_wrap(~ TagId, scales = "free_y") +
+  scale_fill_manual(values = c("#F8766D", "#00BFC4")) +
   theme_minimal() + 
-  labs(title = "Number of Log Intervals per Month",
+  labs(title = "Number of GPS Location Fixes per Month",
        subtitle = "Faceted by Herd",
        x = "Month",
-       y = "Number of Log Intervals",
-       fill = "Herd")
+       y = "Number of GPS Location Fixes") +
+  theme(legend.position = "none")
 
 # count
 
@@ -371,9 +375,7 @@ collar_data_equal %>%
 collar_data = collar_data_equal
   
 
-# MAPS ----
-
-## FIG 1. Zambia, KNP, and lake Iteshi ----
+# MAPS (STUDY AREA AND MOVEMENT TRACKS) ----
 
 # convert to sf points
 tmap_movement_sf <- st_as_sf(
@@ -402,7 +404,7 @@ st_crs(zambia_boundary) <- 32735
 protected_area <- st_transform(protected_area, 4326)
 zambia_boundary <- st_transform(zambia_boundary, 4326)
 
-st_bbox(protected_area)
+st_bbox(protected_area) #confirm spatial alignment
 st_bbox(zambia_boundary)
 
 zambia_label <- st_point_on_surface(zambia_boundary)
@@ -410,6 +412,8 @@ zambia_label$label <- "Zambia"
 
 kafue_label <- st_point_on_surface(protected_area)
 kafue_label$label <- "Kafue National Park"
+
+## FIG 1: Study area Zambia, KNP, and lake Iteshi ----
 
 tmap_mode("plot")
 
@@ -441,7 +445,7 @@ grid.raster(
 
 ## Movement Tracks and Roads ----
 
-# convert to sf object
+# convert collar data to sf object
 
 movement_sf <- st_as_sf(
   collar_data,
@@ -449,13 +453,13 @@ movement_sf <- st_as_sf(
   crs = 4326
 )
 
-bbox <- st_bbox(movement_sf)
+bbox <- st_bbox(movement_sf) #define spatial extent of data
 
 ### Define Study Area ----
 ### osm needs a numeric object, not an sf bbox
 
 bbox_vec = c(
-  xmin = bbox["xmin"] - 0.01, #adding buffer
+  xmin = bbox["xmin"] - 0.01, #adding visual buffer
   ymin = bbox["ymin"] - 0.01,
   xmax = bbox["xmax"] + 0.01,
   ymax = bbox["ymax"] + 0.01
@@ -469,7 +473,7 @@ ggplot() +
   theme_minimal() +
   labs(title = "Elephant Collar Locations")
 
-### originally looked like there's an outlier needs to be removed 
+### originally looked like there was an outlier that needed to be removed 
 ### went back above and added filtering step to correct for that
 
 #### distinguish herd by color
@@ -479,11 +483,11 @@ ggplot() +
   theme_minimal() +
   labs(title = "Elephant Collar Locations, Faceted by Herd")
 
-#### create lines
+#### Create movement lines ----
 
 movement_lines <- collar_data %>%
-  arrange(TagId, Timestamp) %>%
-  group_by(TagId) %>%
+  arrange(TagId, Timestamp) %>% #arranges data by herd and time
+  group_by(TagId) %>% # groups by herd for next function
   summarise(
     geometry = st_cast(st_combine(st_as_sf(cur_data(),
                                            coords = c("longitude", "latitude"),
@@ -495,7 +499,7 @@ movement_lines <- collar_data %>%
 class(movement_lines)
 st_geometry_type(movement_lines)
 
-#### PLOT LINES ----
+#### Plot movement lines ----
 
 ggplot() +
   annotation_map_tile(type = "osm", zoom = 10) +
@@ -504,7 +508,11 @@ ggplot() +
           linewidth = 0.8) +
   theme_minimal()
 
-### Get roads from OSM ----
+### Use Roads from OSM ----
+# this is commented out because while it originally worked,
+# when I re-ran this part of the code I ran into issues with 
+# the OSM server, so I ended up going a separate approach with using
+# a shapefile from a colleague. 
 
 # osm_roads <- opq(bbox = bbox_vec) %>%
 #   add_osm_feature(key = "highway",
@@ -521,17 +529,13 @@ ggplot() +
 # 
 # roads_sf <- roads$osm_lines
 
-# save it so don't have to query OSM in future
-#saveRDS(roads, "roads.rds")
-#roads <- readRDS("roads.rds")
-
 # # select sf object
 # roads_sf <- roads$osm_lines
 # 
 # table(roads_sf$highway)
 # unique(roads_sf$name) # gets names of actual roads within
 
-# using osm extract
+# using osm extract instead...
 # 
 # roads_sf <- oe_get(
 #   "Zambia",
@@ -539,7 +543,7 @@ ggplot() +
 #   query = "SELECT * FROM lines WHERE highway IN ('primary', 'secondary', 'tertiary', 'unclassified')"
 # )
 # 
-# # use my own api key for qgis, arcgis
+# 
 # 
 # roads_sf <- st_as_sf(roads_sf) %>%
 #   st_intersection(st_as_sfc(st_bbox(movement_sf)))
@@ -603,7 +607,9 @@ cordon_bbox <- st_as_sfc(st_bbox(c(
 
 roads_zoom <- st_intersection(roads_shp, cordon_bbox)
 
-# change name of roads_shp for mapping later on
+# change name of roads_shp for mapping later on to match name
+# I had originally made when using osm data
+
 roads_sf <- roads_shp
 
 # map just the zoomed in area
@@ -619,9 +625,10 @@ ggplot() +
   theme_minimal()
 
 # add 49 to 8 to getCordon road segment to extend high enough
+# to capture all crossings
 cordon_road <- roads_shp %>%
   filter(road_id %in% c(8, 49)) %>%
-  summarise()
+  summarise() #merges linestrings
 
 # map to check that 8 and 49 together go high enough
 
@@ -646,7 +653,7 @@ cordon_label_point <- cordon_road_projected %>%
   st_cast("POINT") %>%
   st_transform(4326)
 
-#### PLOT ROADS ----
+#### Plot Roads ----
 
 ggplot() +
   annotation_map_tile(type = "osm", zoom = 10) +
@@ -654,7 +661,7 @@ ggplot() +
   theme_minimal() +
   labs(title = "Elephant Paths and Major Roads")
 
-#### PLOT LINES AND ROADS ----
+#### Plot Roads AND Movement Lines ----
 
 ggplot() +
   annotation_map_tile(type = "osm", zoom = 10) +
@@ -684,9 +691,10 @@ ggplot() +
     axis.ticks = element_blank()
   ) 
 
-## Kernel Density Estimates ----
+# UTILIZATION DISTRIBUTION ----
+# Kernel Density Estimates
 
-# project sf into a metric CRS
+# first need to project sf into a metric CRS for calculations
 
 collar_sf <- st_as_sf(
   collar_data, 
@@ -723,36 +731,36 @@ amt_tracks <- make_track(
 
 amt_tracks_by_herd <- collar_equal_proj %>%
   group_by(TagId) %>%
-  group_split()
+  group_split() # creates a list of dataframes (each herd is a df)
 
 # build KDEs separately
 
-kde_list <- lapply(amt_tracks_by_herd, function(df){
-  herd_id <- unique(df$TagId)
+kde_list <- lapply(amt_tracks_by_herd, function(df){ #loops over each herd's df
+  herd_id <- unique(df$TagId) # lets herd ID be added back to polygon later on
   
-  trk <- make_track(
+  trk <- make_track( #makes amt style tracks
     df,
     .x = x_,
     .y = y_,
     .t = Timestamp,
     id = TagId,
-    crs = st_crs(collar_sf_utm)$wkt
+    crs = st_crs(collar_sf_utm)$wkt #amt package needs full CRS def, which $wkt provides
   )
   
-  kde <- hr_kde(trk)
+  kde <- hr_kde(trk) # estimate utilization distribution for each herds amt movement data
   
-  kde_50 <- hr_isopleths(kde, levels = 0.50) %>%
+  kde_50 <- hr_isopleths(kde, levels = 0.50) %>% # extract 50% isopleth
     mutate(TagId = herd_id)
   
-  kde_95 <- hr_isopleths(kde, levels = 0.95) %>%
+  kde_95 <- hr_isopleths(kde, levels = 0.95) %>% # extract 95% isopleth
     mutate(TagId = herd_id)
   
-  list(kde_50 = kde_50, kde_95 = kde_95)
+  list(kde_50 = kde_50, kde_95 = kde_95) # returns a list with kde 50 and 90 for each herd
 })
 
 # combine all together
-kde_50 <- do.call(rbind, lapply(kde_list, `[[`, "kde_50"))
-kde_95 <- do.call(rbind, lapply(kde_list, `[[`, "kde_95"))
+kde_50 <- do.call(rbind, lapply(kde_list, `[[`, "kde_50")) #[[ is an operator signifying to pull out the element named kde_50 from each list item
+kde_95 <- do.call(rbind, lapply(kde_list, `[[`, "kde_95")) #do.call + rbind combines into one list
 
 #check names
 names(kde_50)
@@ -773,10 +781,10 @@ ggplot() +
 #####Calculate areas ----
 
 ## 95% isopopleth
-kde_95 %>% mutate(area_m2 = st_area(geometry),
-                  area_km2 = as.numeric(area_m2)/1e6) %>%
+kde_95 %>% mutate(area_m2 = st_area(geometry), #geometry is column name in kde_50 object
+                  area_km2 = as.numeric(area_m2)/1e6) %>% #convert m2 to km2
 st_drop_geometry() %>%
-select(TagId, level, area_km2)
+select(TagId, level, area_km2) # select only what I want for tibble
 
 ## 50% isopleth
 
@@ -785,16 +793,16 @@ kde_50 %>% mutate(area_m2 = st_area(geometry),
   st_drop_geometry() %>%
   select(TagId, level, area_km2)
 
-# FIG 3. CROSSINGS PER DAY ----
-## Calculate Crossings ----
+
+# CROSSINGS ----
 crossings <- st_intersection(movement_lines, roads_sf)
 
 crossings %>%
   st_drop_geometry() %>% #have to drop geometry before counting
   count(TagId)
 
-### but this is showing for the whole linestring
-### need to build step segments
+### the above simple calculation is wrong because it is showing crossings for 
+### the whole linestring - need to build step segments...
 
 # movement_steps <- collar_data %>%
 #   arrange(TagId, Timestamp) %>%
@@ -839,7 +847,7 @@ movement_steps <- collar_data %>%
   st_as_sf() %>%
   ungroup()
 
-# THIS WAS FOR CALCULATING INTERSECTIONS WITH OSM DATA
+# THIS WAS FOR CALCULATING INTERSECTIONS WITH OSM DATA, which i'm no longer using
 # calculate intersections of steps with roads
 # 
 # step_crossings <- st_intersection(movement_steps, roads_sf)
@@ -917,11 +925,10 @@ cordon_cross_points %>%
   st_drop_geometry() %>%
   count(TagId)
 
-##### Map where Cross Points are ----
-
+##### FIG 3: Map Movement Paths, Roads and Cross Points ----
 ggplot() +
   annotation_map_tile(type = "osm", zoom =10) +
-  geom_sf(data = roads_sf, color = "grey", linewidth = 0.8) +
+  geom_sf(data = roads_sf, color = "darkgrey", linewidth = 0.7) +
   geom_sf(data = cordon_road, color = "red", linewidth = 1.2) +
   geom_sf(data = movement_lines, aes(color = as.factor(TagId)), linewidth = 0.8) +
   geom_sf(data = cordon_cross_points, color = "yellow", size = 1) + 
@@ -932,7 +939,9 @@ ggplot() +
     axis.title = element_blank(),
     axis.text = element_blank(),
     axis.ticks = element_blank()
-  ) 
+  ) +
+  annotation_scale(location = "br") +
+  annotation_north_arrow(location = "tr", style = north_arrow_fancy_orienteering)
 
 
 ### Buffered -----
@@ -960,7 +969,8 @@ median_step <- as.numeric(median_step)
 median_step
 
 # look at distribution of step lengths to make sure this seems right
-### SF.X Distribution of Step Lengths ----
+
+### SF3 Distribution of Step Lengths ----
 hist(
   as.numeric(movement_steps_dist$step_length_m),
   breaks = 50,
@@ -968,7 +978,7 @@ hist(
   xlab = "Step Length (m)",
   ylab = "Frequency")
 
-# NO LONGER USING BUFFER IN CALCULATIONS SO COMMENTED OUT
+# NO LONGER USING BUFFER IN CALCULATIONS SO COMMENTED NEXT SECTION OUT
 # # buffer roads
 # 
 # roads_buffer <- st_buffer(roads_sf, dist = 10)
@@ -1055,7 +1065,7 @@ crossings_monthly %>%
     n_months = n()
   )
 
-##### Plot Monthly Crossing Rates ----
+##### FIG 4: Plot Monthly Crossing Rates ----
 
 ggplot(crossings_monthly, aes(x = as.factor(TagId), y = n_crossings)) +
   geom_boxplot() +
@@ -1179,7 +1189,7 @@ cordon_cross_ndvi <- cordon_cross_ndvi %>% mutate(
   ndvi = as.numeric(ndvi)
 )
 
-### Plot NDVI and KDE ----
+### FIG 5: Plot NDVI and KDE ----
 crs(ndvi_raster)
 st_crs(kde_95)
 
@@ -1205,7 +1215,10 @@ ggplot() +
     axis.title = element_blank(),
     axis.text = element_blank(),
     axis.ticks = element_blank()
-  ) 
+  ) +
+  annotation_scale(location = "bl") +
+  annotation_north_arrow(location = "tl", style = north_arrow_fancy_orienteering)
+
 
 ### Calculate mean ndvi within each herd's core area ----
 
@@ -1266,11 +1279,11 @@ ndvi_sample <- ndvi_vals %>%
 
 wilcox.test(NDVI ~ TagId, data = ndvi_sample)
 
-# r has baked in ttest, goes over homogeneity of variance
+# also r has baked in ttest, goes over homogeneity of variance
 # Welch means its corrected
 t.test(NDVI ~ TagId, data = ndvi_sample)
 
-#### plot ndvi core area difference ----
+#### FIG 6: plot ndvi core area difference ----
 
 ggplot(ndvi_sample, aes(x = factor(TagId), y = NDVI)) +
          geom_boxplot() +
@@ -1278,7 +1291,7 @@ ggplot(ndvi_sample, aes(x = factor(TagId), y = NDVI)) +
          labs(
            x = "Herd",
            y = "NDVI Core Area"
-         )
+         ) 
 
 ## Model ----
 
@@ -1337,20 +1350,7 @@ tab_model(
   file = "SE_neg_binomial_infant_crossing_model_results.doc"
 )
 
-### Binary ---- 
-
-## make binary data within crossed column ( 1= true, 0 = false)
-# cordon_cross_ndvi_w_periods <- cordon_cross_ndvi_w_periods %>%
-#   mutate(crossed = if_else(n_crossings > 0, 1, 0))
-# 
-# model_binary <- glmmTMB(
-#   crossed ~ TagId + ndvi + (1 | period),
-#   data = cordon_cross_ndvi_w_periods,
-#   family = binomial
-# )
-
-# Visualize Variance across time periods detected in
-# Negative Binomial Model
+#### SF 4: Visualize Variance across time periods detected in Negative Binomial Model ----
 
 crossings_per_period <- cordon_cross_ndvi_w_periods %>%
   group_by(period, TagId) %>%
@@ -1362,4 +1362,20 @@ ggplot(crossings_per_period, aes(x = period, y = total_crossings, color = TagId)
   theme_minimal() +
   labs(title = "Number of Cordon Road Crossings by Period",
        x = "Time (16 Day Periods)",
-       y = "Number of Cordon Road Crossings")
+       y = "Number of Cordon Road Crossings",
+       color = "Herd")
+
+### Binary
+
+# thought i could explore a binary model too, but after discussing
+# with Chaves decided to go with negative binomial 
+
+## make binary data within crossed column ( 1= true, 0 = false)
+# cordon_cross_ndvi_w_periods <- cordon_cross_ndvi_w_periods %>%
+#   mutate(crossed = if_else(n_crossings > 0, 1, 0))
+# 
+# model_binary <- glmmTMB(
+#   crossed ~ TagId + ndvi + (1 | period),
+#   data = cordon_cross_ndvi_w_periods,
+#   family = binomial
+# )
