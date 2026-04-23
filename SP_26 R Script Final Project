@@ -978,6 +978,8 @@ hist(
   xlab = "Step Length (m)",
   ylab = "Frequency")
 
+summary(movement_steps_dist$step_length_m)
+
 # NO LONGER USING BUFFER IN CALCULATIONS SO COMMENTED NEXT SECTION OUT
 # # buffer roads
 # 
